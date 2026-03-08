@@ -6,8 +6,8 @@
 
 - 🚀 **FastMCP 框架** - 採用官方推薦的高階 MCP 框架，程式碼簡潔易維護
 - 📉 **Token 耗用優化** - 摘要模式、條文分頁、關鍵字精準回傳
-- 🔍 **6 種查詢工具** - 涵蓋搜尋、條文、關鍵字、代碼驗證等場景
-- 🌐 **資料來源** - 直連 [法務部全國法規資料庫](https://law.moj.gov.tw/)
+- 🔍 **7 種查詢工具** - 涵蓋搜尋、條文、關鍵字、代碼驗證、裁判書查詢等場景
+- 🌐 **資料來源** - 直連 [法務部全國法規資料庫](https://law.moj.gov.tw/) 與 [司法院裁判書系統](https://judgment.judicial.gov.tw/FJUD/default.aspx)
 
 ## 主要工具
 
@@ -19,6 +19,7 @@
 | `get_single_article` | 查詢特定法條詳細內容（例如：民法第1條）|
 | `search_by_keyword` | 在所有法規中以關鍵字搜尋相關條文 |
 | `validate_law_pcode` | 驗證法規代碼（pcode）是否有效 |
+| `search_judgments_by_law` | 依據法規名稱或關鍵字查詢司法院裁判書系統相關判例 |
 
 ## 安裝使用
 
@@ -26,13 +27,6 @@
 
 ```bash
 uvx taiwan-law-mcp
-```
-
-### 使用 pip
-
-```bash
-pip install taiwan-law-mcp
-taiwan-law-mcp
 ```
 
 ### 本地開發
@@ -127,6 +121,18 @@ uv run fastmcp run src/taiwan_law_mcp/server.py
     "keyword": "獨占",
     "max_results": 10,
     "summary_only": true
+  }
+}
+```
+
+### 查詢最新相關裁判書
+
+```json
+{
+  "name": "search_judgments_by_law",
+  "arguments": {
+    "keyword": "勞動基準法 21",
+    "max_results": 5
   }
 }
 ```

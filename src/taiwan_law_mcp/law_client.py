@@ -62,6 +62,10 @@ class LawClient:
         """驗證法規代碼"""
         return validate_pcode(pcode)
 
+    def search_judgments(self, keyword: str, max_results: int = 5) -> Dict[str, Any]:
+        """搜尋裁判書"""
+        return search_judgments(keyword, max_results)
+
     def get_full_law(self, pcode: str = None, law_name: str = None,
                      summary_mode: bool = False, max_articles: int = 0) -> Dict[str, Any]:
         """取得完整法規內容"""
@@ -204,6 +208,130 @@ def search_law_by_name(keyword: str, max_suggestions: int = 5) -> Dict[str, Any]
             return {"status": "multiple_matches", "result": None, "suggestions": parsed["suggestions"][:max_suggestions]}
         else:
             return {"status": "no_match", "result": None, "suggestions": []}
+
+
+def search_judgments(keyword: str, max_results: int = 5) -> Dict[str, Any]:
+    """
+    依據法規與條號關鍵字，搜尋司法院裁判書系統中的相關判例。
+    
+    Args:
+        keyword: 查詢關鍵字，例如「勞動基準法 21」或「勞動基準法 第 21 條」
+        max_results: 最大回傳筆數 (預設 5 筆)
+        
+    Returns:
+        包含查詢結果或錯誤訊息的字典
+    """
+    results = []
+    
+    with requests.Session() as sess:
+        sess.headers.update(HEADERS)
+        # 加入更完整的 headers 防止被阻擋
+        sess.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+            "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+        })
+
+        # 1. 取得首頁以獲取 VIEWSTATE 等表單狀態
+        url_default = "https://judgment.judicial.gov.tw/FJUD/default.aspx"
+        try:
+            r1 = sess.get(url_default, timeout=15)
+            r1.raise_for_status()
+            soup1 = BeautifulSoup(r1.text, _pick_parser())
+        except Exception as e:
+            return {"error": f"無法連線裁判書系統首頁: {str(e)}", "results": []}
+
+        vs = soup1.select_one("input#__VIEWSTATE")
+        vsg = soup1.select_one("input#__VIEWSTATEGENERATOR")
+        ev = soup1.select_one("input#__EVENTVALIDATION")
+
+        if not (vs and vsg and ev):
+            return {"error": "無法取得裁判書查詢表單必要驗證碼 (__VIEWSTATE等)", "results": []}
+
+        # 2. 送出 POST 查詢
+        payload = {
+            "__VIEWSTATE": vs.get("value", ""),
+            "__VIEWSTATEGENERATOR": vsg.get("value", ""),
+            "__VIEWSTATEENCRYPTED": "",
+            "__EVENTVALIDATION": ev.get("value", ""),
+            "txtKW": keyword.strip(),
+            "judtype": "JUDBOOK",
+            "whosub": "0",
+            "ctl00$cp_content$btnSimpleQry": "送出查詢"
+        }
+
+        # 暫時加上 Origin 與 Referer
+        post_headers = sess.headers.copy()
+        post_headers["Content-Type"] = "application/x-www-form-urlencoded"
+        post_headers["Origin"] = "https://judgment.judicial.gov.tw"
+        post_headers["Referer"] = "https://judgment.judicial.gov.tw/FJUD/default.aspx"
+
+        try:
+            r2 = sess.post(url_default, data=payload, headers=post_headers, timeout=15)
+            r2.raise_for_status()
+            soup2 = BeautifulSoup(r2.text, _pick_parser())
+        except Exception as e:
+            return {"error": f"送出裁判書查詢失敗: {str(e)}", "results": []}
+
+        # 3. 從回傳結果中提取 iframe src
+        iframe = soup2.select_one("iframe#iframe-data")
+        if not iframe:
+            return {"error": "查詢結果頁面未包含 iframe，可能查無結果或系統變更", "results": []}
+            
+        iframe_src = iframe.get("src")
+        if not iframe_src:
+             return {"error": "無法獲取結果 iframe 的來源網址", "results": []}
+
+        # 4. 抓取 iframe 內的實際清單
+        url_iframe = urljoin("https://judgment.judicial.gov.tw/FJUD/", iframe_src)
+        try:
+            r3 = sess.get(url_iframe, timeout=15)
+            r3.raise_for_status()
+            soup3 = BeautifulSoup(r3.text, _pick_parser())
+        except Exception as e:
+            return {"error": f"獲取裁判書清單失敗: {str(e)}", "results": []}
+
+        links = soup3.select("a#hlTitle")
+        for a in links:
+            title = a.get_text(" ", strip=True)
+            href = a.get("href", "")
+            if not href or href.startswith("javascript"):
+                continue
+                
+            abs_url = urljoin("https://judgment.judicial.gov.tw/FJUD/", href)
+            
+            # 取得 裁判案由 (reason) 與 摘要 (summary)
+            # a_tag -> td -> tr (第一列)
+            tr1 = a.find_parent("tr")
+            reason = ""
+            summary = ""
+            if tr1:
+                tds = tr1.find_all("td")
+                if len(tds) >= 4:
+                    reason = tds[3].get_text(strip=True)
+                
+                # 找下一個 tr (第二列，通常有 class="summary")
+                tr2 = tr1.find_next_sibling("tr")
+                if tr2 and "summary" in tr2.get("class", []):
+                    span = tr2.find("span", class_="tdCut")
+                    if span:
+                        summary = span.get_text(strip=True)
+
+            results.append({
+                "title": title,
+                "url": abs_url,
+                "reason": reason,
+                "summary": summary
+            })
+            if len(results) >= max_results:
+                break
+
+    return {
+        "keyword": keyword,
+        "count": len(results),
+        "results": results[:max_results],
+        "meta": {"max_results": max_results}
+    }
 
 
 def get_law_pcode(law_name: str) -> Optional[str]:

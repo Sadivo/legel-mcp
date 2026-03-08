@@ -19,6 +19,7 @@ try:
         fetch_single_article,
         parse_single_article,
         keyword_search,
+        search_judgments,
         _pick_parser,
     )
 except ImportError:
@@ -35,6 +36,7 @@ except ImportError:
         fetch_single_article,
         parse_single_article,
         keyword_search,
+        search_judgments,
         _pick_parser,
     )
 
@@ -193,6 +195,20 @@ def validate_law_pcode(pcode: str) -> str:
     """
     is_valid = validate_pcode(pcode)
     result = {"pcode": pcode, "valid": is_valid}
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+@mcp.tool
+def search_judgments_by_law(keyword: str, max_results: int = 5) -> str:
+    """依據法規名稱與條號，搜尋司法院裁判書系統中的相關判例。
+
+    當使用者已經查閱完法規內容，並希望知道實務上法院如何判決時使用。
+
+    Args:
+        keyword: 查詢關鍵字，例如「勞動基準法 21」或「民法第184條」
+        max_results: 最大回傳筆數 (預設 5)
+    """
+    result = search_judgments(keyword, max_results)
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
